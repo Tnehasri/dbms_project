@@ -1,0 +1,83 @@
+# Docker Compose for Image Gallery Stack
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: imagegallery_postgres
+    environment:
+      POSTGRES_DB: imagegallery
+      POSTGRES_USER: gallery_user
+      POSTGRES_PASSWORD: your_password
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database_setup.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - imagegallery_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gallery_user"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    container_name: imagegallery_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "19200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - imagegallery_network
+
+  # Flask Backend
+  backend:
+    build: ./backend
+    container_name: imagegallery_backend
+    environment:
+      - FLASK_SQLALCHEMY_DATABASE_URI=postgresql://gallery_user:your_password@postgres:5432/imagegallery
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "15000:5000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+    networks:
+      - imagegallery_network
+
+  # React Frontend
+  frontend:
+    build: ./frontend
+    container_name: imagegallery_frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:15000
+    ports:
+      - "13000:3000"
+    depends_on:
+      - backend
+    networks:
+      - imagegallery_network
+
+volumes:
+  postgres_data:
+  elasticsearch_data:
+
+networks:
+  imagegallery_network:
+    driver: bridge
+
